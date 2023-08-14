@@ -1,28 +1,25 @@
-use std::{collections::{BinaryHeap, HashMap}, cmp::Ordering};
+use std::{
+    cmp::Ordering,
+    collections::{BinaryHeap, HashMap},
+};
 
-use nalgebra::{Vector4, Matrix4, Point3};
+use nalgebra::{Const, Matrix4, Point3, Vector4};
 use num_traits::{cast, Float};
 
 use crate::{
-    mesh::traits::{
-        EditableMesh, 
-        Mesh, 
-        TopologicalMesh, 
-        MeshMarker, 
-        Marker
-    }, 
-    algo::edge_collapse
+    algo::edge_collapse,
+    mesh::traits::{EditableMesh, Marker, Mesh, MeshMarker, TopologicalMesh},
 };
 
 /// Collapse candidate
 struct Contraction<TMesh: Mesh> {
     edge: TMesh::EdgeDescriptor,
-    cost: TMesh::ScalarType
+    cost: TMesh::ScalarType,
 }
 
 impl<TMesh: Mesh> Contraction<TMesh> {
     fn new(edge: TMesh::EdgeDescriptor, cost: TMesh::ScalarType) -> Self {
-        return Self { edge, cost } ;
+        return Self { edge, cost };
     }
 }
 
@@ -58,25 +55,31 @@ pub trait CollapseStrategy<TMesh: Mesh>: Default {
     fn get_cost(&self, mesh: &TMesh, edge: &TMesh::EdgeDescriptor) -> TMesh::ScalarType;
 
     /// Returns point at which `edge` will be collapsed. Ideally it should minimize cost.
-    fn get_placement(&self, mesh: &TMesh, edge: &TMesh::EdgeDescriptor) -> Point3<TMesh::ScalarType>;
+    fn get_placement(
+        &self,
+        mesh: &TMesh,
+        edge: &TMesh::EdgeDescriptor,
+    ) -> Point3<TMesh::ScalarType>;
 
     /// Called on edge collapse. Can be used to update internal state.
     fn collapse_edge(&mut self, mesh: &TMesh, edge: &TMesh::EdgeDescriptor);
 }
 
-/// 
+///
 /// Collapsing strategy based on quadric error.
 /// Collapsing cost is approximated using quadric matrices.
 /// Collapsing point is placed on middle of edge.
 /// Based on article of Heckber and Garland: http://www.cs.cmu.edu/~garland/Papers/quadrics.pdf.
-/// 
+///
 pub struct QuadricError<TMesh: Mesh> {
-    vertex_quadric_map: HashMap<TMesh::VertexDescriptor, Matrix4<TMesh::ScalarType>>
+    vertex_quadric_map: HashMap<TMesh::VertexDescriptor, Matrix4<TMesh::ScalarType>>,
 }
 
 impl<TMesh: Mesh> Default for QuadricError<TMesh> {
     fn default() -> Self {
-        return Self { vertex_quadric_map: HashMap::new() };
+        return Self {
+            vertex_quadric_map: HashMap::new(),
+        };
     }
 }
 
@@ -102,11 +105,15 @@ impl<TMesh: Mesh + TopologicalMesh> CollapseStrategy<TMesh> for QuadricError<TMe
                 quadric += p * p_t;
             });
 
-            self.vertex_quadric_map.insert(vertex, quadric);  
+            self.vertex_quadric_map.insert(vertex, quadric);
         }
     }
 
-    fn get_cost(&self, mesh: &TMesh, edge: &<TMesh as Mesh>::EdgeDescriptor) -> <TMesh as Mesh>::ScalarType {
+    fn get_cost(
+        &self,
+        mesh: &TMesh,
+        edge: &<TMesh as Mesh>::EdgeDescriptor,
+    ) -> <TMesh as Mesh>::ScalarType {
         let (v1, v2) = mesh.edge_vertices(edge);
 
         let q1 = self.vertex_quadric_map.get(&v1).unwrap();
@@ -120,7 +127,11 @@ impl<TMesh: Mesh + TopologicalMesh> CollapseStrategy<TMesh> for QuadricError<TMe
     }
 
     #[inline]
-    fn get_placement(&self, mesh: &TMesh, edge: &<TMesh as Mesh>::EdgeDescriptor) -> Point3<<TMesh as Mesh>::ScalarType> {
+    fn get_placement(
+        &self,
+        mesh: &TMesh,
+        edge: &<TMesh as Mesh>::EdgeDescriptor,
+    ) -> Point3<<TMesh as Mesh>::ScalarType> {
         let (v1_pos, v2_pos) = mesh.edge_positions(edge);
         return (v1_pos + v2_pos.coords) * cast(0.5).unwrap();
     }
@@ -133,17 +144,15 @@ impl<TMesh: Mesh + TopologicalMesh> CollapseStrategy<TMesh> for QuadricError<TMe
     }
 }
 
-
-
 ///
 /// Incremental edge decimator.
 /// This `struct` implements incremental edge collapse algorithm.
 /// On each iteration edge with smallest cost is collapsed.
-/// 
+///
 /// ## Generics
 /// * `TMesh` - mesh type
 /// * `TCollapseStrategy` - strategy that defines edge collapsing cost and placement
-/// 
+///
 /// ## Example
 /// ```ignore
 /// let mut decimator = IncrementalDecimator::<CornerTableD, QuadricError<CornerTableD>>::new()
@@ -151,24 +160,26 @@ impl<TMesh: Mesh + TopologicalMesh> CollapseStrategy<TMesh> for QuadricError<TMe
 ///     .min_faces_count(None);
 /// decimator.decimate(&mut mesh);
 /// ```
-/// 
-pub struct IncrementalDecimator<TMesh, TCollapseStrategy>
-where 
-    TMesh: EditableMesh + TopologicalMesh + MeshMarker, 
-    TCollapseStrategy: CollapseStrategy<TMesh>
+///
+pub struct IncrementalDecimator<TMesh, TCollapseStrategy, TMaxError>
+where
+    TMesh: EditableMesh + TopologicalMesh + MeshMarker,
+    TCollapseStrategy: CollapseStrategy<TMesh>,
+    TMaxError: MaxError<TMesh>,
 {
-    max_error: TMesh::ScalarType,
+    max_error: Option<TMaxError>,
     min_faces_count: usize,
     min_face_quality: TMesh::ScalarType,
     priority_queue: BinaryHeap<Contraction<TMesh>>,
     not_safe_collapses: Vec<Contraction<TMesh>>,
-    collapse_strategy: TCollapseStrategy
+    collapse_strategy: TCollapseStrategy,
 }
 
-impl<TMesh, TCollapseStrategy> IncrementalDecimator<TMesh, TCollapseStrategy> 
-where 
-    TMesh: EditableMesh + TopologicalMesh + MeshMarker, 
-    TCollapseStrategy: CollapseStrategy<TMesh> 
+impl<TMesh, TCollapseStrategy, TMaxError> IncrementalDecimator<TMesh, TCollapseStrategy, TMaxError>
+where
+    TMesh: EditableMesh + TopologicalMesh + MeshMarker,
+    TCollapseStrategy: CollapseStrategy<TMesh>,
+    TMaxError: MaxError<TMesh>,
 {
     #[inline]
     pub fn new() -> Self {
@@ -176,35 +187,36 @@ where
     }
 
     ///
-    /// Set maximum allowed error for decimation. Edges with higher error won't be collapsed. 
+    /// Set maximum allowed error for decimation. Edges with higher error won't be collapsed.
     /// Should be a positive number. Default is `0.001`.
     /// Pass `None` to disable max error check.
-    /// 
+    ///
     #[inline]
-    pub fn max_error(mut self, max_error: Option<TMesh::ScalarType>) -> Self {
-        match max_error {
-            Some(err) => { 
-                debug_assert!(err.is_sign_positive(), "Max error should be a positive");
-                self.max_error = err;
-            },
-            None => self.max_error = TMesh::ScalarType::infinity(),
-        };
+    pub fn max_error(mut self, max_error: Option<TMaxError>) -> Self {
+        self.max_error = max_error;
+        // match max_error {
+        //     Some(err) => {
+        //         debug_assert!(err.is_sign_positive(), "Max error should be a positive");
+        //         self.max_error = err;
+        //     }
+        //     None => self.max_error = ConTMesh::ScalarType::infinity(),
+        // };
 
         return self;
-    }    
-    
+    }
+
     ///
     /// Set minimum number of faces in resulting mesh. Should be a non-zero number.
     /// By default this check is disabled.
     /// Pass `None` to disable this check.
-    /// 
+    ///
     #[inline]
     pub fn min_faces_count(mut self, min_edges_count: Option<usize>) -> Self {
         match min_edges_count {
-            Some(count) => { 
+            Some(count) => {
                 debug_assert!(count != 0, "Min faces count must be positive. If you was intended to disable faces count check pass None rather than zero.");
                 self.min_faces_count = count;
-            },
+            }
             None => self.min_faces_count = 0,
         };
 
@@ -213,7 +225,7 @@ where
 
     ///
     /// Decimated given `mesh`.
-    /// 
+    ///
     /// ## Example
     /// ```ignore
     /// let mut decimator = IncrementalDecimator::<CornerTableD, QuadricError<CornerTableD>>::new()
@@ -221,9 +233,12 @@ where
     ///     .min_faces_count(None);
     /// decimator.decimate(&mut mesh);
     /// ```
-    /// 
+    ///
     pub fn decimate(&mut self, mesh: &mut TMesh) {
-        debug_assert!(self.max_error.is_finite() || self.min_faces_count > 0, "Either max error or min faces count should be set.");
+        debug_assert!(
+            self.max_error.is_some() || self.min_faces_count > 0,
+            "Either max error or min faces count should be set."
+        );
 
         // Clear internals data structures
         self.priority_queue.clear();
@@ -250,7 +265,7 @@ where
 
                 let (v1, v2) = mesh.edge_vertices(&best.edge);
                 let collapse_at = self.collapse_strategy.get_placement(mesh, &best.edge);
-        
+
                 // Skip not safe collapses
                 if !edge_collapse::is_safe(mesh, &best.edge, &collapse_at, self.min_face_quality) {
                     self.not_safe_collapses.push(best);
@@ -262,13 +277,15 @@ where
                     marker.mark_edge(&best.edge, false);
 
                     best.cost = self.collapse_strategy.get_cost(mesh, &best.edge);
-                    if best.cost < self.max_error {
-                        self.priority_queue.push(best);
+                    if let Some(max_error) = &self.max_error {
+                        if best.cost < max_error.max_error(mesh, &best.edge) {
+                            self.priority_queue.push(best);
+                        }
                     }
 
                     continue;
-                }        
-                
+                }
+
                 // Find edges affected by collapse
                 mesh.edges_around_vertex(&v1, |edge| marker.mark_edge(edge, true));
                 mesh.edges_around_vertex(&v2, |edge| marker.mark_edge(edge, true));
@@ -284,7 +301,7 @@ where
                 } else {
                     remaining_faces_count -= 2;
                 }
-                
+
                 // Collapse edge
                 mesh.collapse_edge(&best.edge, &collapse_at);
 
@@ -306,9 +323,19 @@ where
                     let (v1_pos, v2_pos) = mesh.edge_positions(&collapse.edge);
                     let new_position = (v1_pos + v2_pos.coords) * cast(0.5).unwrap();
 
-                    // Safe to collapse and have low error
-                    if new_cost < self.max_error && edge_collapse::is_safe(mesh, &collapse.edge, &new_position, self.min_face_quality) {
-                        self.priority_queue.push(Contraction::new(collapse.edge, new_cost));
+                    if let Some(max_error) = &self.max_error {
+                        // Safe to collapse and have low error
+                        if new_cost < max_error.max_error(mesh, &collapse.edge)
+                            && edge_collapse::is_safe(
+                                mesh,
+                                &collapse.edge,
+                                &new_position,
+                                self.min_face_quality,
+                            )
+                        {
+                            self.priority_queue
+                                .push(Contraction::new(collapse.edge, new_cost));
+                        }
                     }
                 }
 
@@ -324,26 +351,83 @@ where
             let is_collapse_topologically_safe = edge_collapse::is_topologically_safe(mesh, &edge);
 
             // Collapsable and low cost?
-            if cost < self.max_error && is_collapse_topologically_safe {
-                self.priority_queue.push(Contraction::new(edge, cost));
+            if let Some(max_error) = &self.max_error {
+                if cost < max_error.max_error(mesh, &edge) && is_collapse_topologically_safe {
+                    self.priority_queue.push(Contraction::new(edge, cost));
+                }
             }
         }
     }
 }
 
-impl<TMesh, TCollapseStrategy> Default for IncrementalDecimator<TMesh, TCollapseStrategy> 
-where 
-    TMesh: EditableMesh + TopologicalMesh + MeshMarker, 
-    TCollapseStrategy: CollapseStrategy<TMesh> 
+impl<TMesh, TCollapseStrategy, TMaxError> Default
+    for IncrementalDecimator<TMesh, TCollapseStrategy, TMaxError>
+where
+    TMesh: EditableMesh + TopologicalMesh + MeshMarker,
+    TCollapseStrategy: CollapseStrategy<TMesh>,
+    TMaxError: MaxError<TMesh>,
 {
     fn default() -> Self {
         return Self {
-            max_error: cast(0.001).unwrap(),
+            max_error: Some(TMaxError::default()),
             min_faces_count: 0,
             min_face_quality: cast(0.1).unwrap(),
             priority_queue: BinaryHeap::new(),
             not_safe_collapses: Vec::new(),
-            collapse_strategy: TCollapseStrategy::default()
+            collapse_strategy: TCollapseStrategy::default(),
         };
+    }
+}
+pub trait MaxError<TMesh: Mesh>: Default {
+    fn max_error(&self, mesh: &TMesh, edge: &TMesh::EdgeDescriptor) -> TMesh::ScalarType;
+}
+
+pub struct ConstantMaxError<TMesh: Mesh> {
+    max_error: TMesh::ScalarType,
+}
+
+impl<TMesh> ConstantMaxError<TMesh>
+where
+    TMesh: Mesh,
+{
+    pub fn new(max_error: TMesh::ScalarType) -> Self {
+        Self { max_error }
+    }
+}
+
+impl<TMesh> MaxError<TMesh> for ConstantMaxError<TMesh>
+where
+    TMesh: Mesh,
+{
+    #[inline]
+    fn max_error(
+        &self,
+        _mesh: &TMesh,
+        _edge: &<TMesh as Mesh>::EdgeDescriptor,
+    ) -> <TMesh as Mesh>::ScalarType {
+        self.max_error
+    }
+}
+
+impl<TMesh> Default for ConstantMaxError<TMesh>
+where
+    TMesh: Mesh,
+{
+    fn default() -> Self {
+        Self::new(cast(0.001).unwrap())
+    }
+}
+
+pub struct BoundingSphere<TMesh: Mesh> {
+    origin: Point3<TMesh::ScalarType>,
+    radius: TMesh::ScalarType,
+}
+
+impl<TMesh> BoundingSphere<TMesh>
+where
+    TMesh: Mesh,
+{
+    pub fn contains_point(&self, point: &Point3<TMesh::ScalarType>) -> bool {
+        nalgebra::distance(&self.origin, point) <= self.radius
     }
 }
