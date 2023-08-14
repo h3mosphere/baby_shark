@@ -167,7 +167,7 @@ where
     TCollapseStrategy: CollapseStrategy<TMesh>,
     TMaxError: MaxError<TMesh>,
 {
-    max_error: Option<TMaxError>,
+    max_error: TMaxError,
     min_faces_count: usize,
     min_face_quality: TMesh::ScalarType,
     priority_queue: BinaryHeap<Contraction<TMesh>>,
@@ -192,7 +192,7 @@ where
     /// Pass `None` to disable max error check.
     ///
     #[inline]
-    pub fn max_error(mut self, max_error: Option<TMaxError>) -> Self {
+    pub fn max_error(mut self, max_error: TMaxError) -> Self {
         self.max_error = max_error;
         // match max_error {
         //     Some(err) => {
@@ -235,10 +235,10 @@ where
     /// ```
     ///
     pub fn decimate(&mut self, mesh: &mut TMesh) {
-        debug_assert!(
-            self.max_error.is_some() || self.min_faces_count > 0,
-            "Either max error or min faces count should be set."
-        );
+        // debug_assert!(
+        //     self.max_error.is_some() || self.min_faces_count > 0,
+        //     "Either max error or min faces count should be set."
+        // );
 
         // Clear internals data structures
         self.priority_queue.clear();
@@ -277,10 +277,8 @@ where
                     marker.mark_edge(&best.edge, false);
 
                     best.cost = self.collapse_strategy.get_cost(mesh, &best.edge);
-                    if let Some(max_error) = &self.max_error {
-                        if best.cost < max_error.max_error(mesh, &best.edge) {
-                            self.priority_queue.push(best);
-                        }
+                    if best.cost < self.max_error.max_error(mesh, &best.edge) {
+                        self.priority_queue.push(best);
                     }
 
                     continue;
@@ -323,19 +321,17 @@ where
                     let (v1_pos, v2_pos) = mesh.edge_positions(&collapse.edge);
                     let new_position = (v1_pos + v2_pos.coords) * cast(0.5).unwrap();
 
-                    if let Some(max_error) = &self.max_error {
-                        // Safe to collapse and have low error
-                        if new_cost < max_error.max_error(mesh, &collapse.edge)
-                            && edge_collapse::is_safe(
-                                mesh,
-                                &collapse.edge,
-                                &new_position,
-                                self.min_face_quality,
-                            )
-                        {
-                            self.priority_queue
-                                .push(Contraction::new(collapse.edge, new_cost));
-                        }
+                    // Safe to collapse and have low error
+                    if new_cost < self.max_error.max_error(mesh, &collapse.edge)
+                        && edge_collapse::is_safe(
+                            mesh,
+                            &collapse.edge,
+                            &new_position,
+                            self.min_face_quality,
+                        )
+                    {
+                        self.priority_queue
+                            .push(Contraction::new(collapse.edge, new_cost));
                     }
                 }
 
@@ -351,10 +347,8 @@ where
             let is_collapse_topologically_safe = edge_collapse::is_topologically_safe(mesh, &edge);
 
             // Collapsable and low cost?
-            if let Some(max_error) = &self.max_error {
-                if cost < max_error.max_error(mesh, &edge) && is_collapse_topologically_safe {
-                    self.priority_queue.push(Contraction::new(edge, cost));
-                }
+            if cost < self.max_error.max_error(mesh, &edge) && is_collapse_topologically_safe {
+                self.priority_queue.push(Contraction::new(edge, cost));
             }
         }
     }
@@ -369,7 +363,7 @@ where
 {
     fn default() -> Self {
         return Self {
-            max_error: Some(TMaxError::default()),
+            max_error: TMaxError::default(),
             min_faces_count: 0,
             min_face_quality: cast(0.1).unwrap(),
             priority_queue: BinaryHeap::new(),
