@@ -1,14 +1,19 @@
 use std::mem::swap;
 
-use crate::{mesh::traits::{Mesh, VertexProperties, TopologicalMesh}, geometry::traits::RealNumber, helpers::utils::sort3};
+use crate::{
+    geometry::traits::RealNumber,
+    helpers::utils::sort3,
+    mesh::traits::{Mesh, TopologicalMesh, VertexProperties},
+};
 
 ///
 /// Wrapper for value of reeb function
-/// 
+///
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct ReebValue<TScalar: RealNumber>(TScalar);
 
-pub type ReebFunction<TMesh> = fn(&TMesh, &<TMesh as Mesh>::VertexDescriptor) -> <TMesh as Mesh>::ScalarType;
+pub type ReebFunction<TMesh> =
+    fn(&TMesh, &<TMesh as Mesh>::VertexDescriptor) -> <TMesh as Mesh>::ScalarType;
 
 impl<TScalar: RealNumber> ReebValue<TScalar> {
     pub fn new(value: TScalar) -> Self {
@@ -33,36 +38,45 @@ impl<TScalar: RealNumber> Ord for ReebValue<TScalar> {
 impl<TScalar: RealNumber> Default for ReebValue<TScalar> {
     #[inline]
     fn default() -> Self {
-        return Self(TScalar::neg_infinity())
+        return Self(TScalar::neg_infinity());
     }
 }
 
-pub type ReebValues<TMesh> = <TMesh as VertexProperties>::VertexPropertyMap<ReebValue<<TMesh as Mesh>::ScalarType>>;
+pub type ReebValues<TMesh> =
+    <TMesh as VertexProperties>::VertexPropertyMap<ReebValue<<TMesh as Mesh>::ScalarType>>;
 
 ///
 /// Vertex ordered by reeb-function value
-/// 
+///
 pub struct OrderedVertex<TMesh: Mesh> {
     vertex: TMesh::VertexDescriptor,
     reeb_value: ReebValue<TMesh::ScalarType>,
-    order: usize
+    order: usize,
 }
 
 impl<TMesh: Mesh> Copy for OrderedVertex<TMesh> {}
 
 impl<TMesh: Mesh> Clone for OrderedVertex<TMesh> {
     fn clone(&self) -> Self {
-        return Self { 
-            vertex: self.vertex.clone(), 
-            reeb_value: self.reeb_value.clone(), 
-            order: self.order.clone() 
+        return Self {
+            vertex: self.vertex.clone(),
+            reeb_value: self.reeb_value.clone(),
+            order: self.order.clone(),
         };
     }
 }
 
 impl<TMesh: Mesh> OrderedVertex<TMesh> {
-    pub fn new(vertex: TMesh::VertexDescriptor, reeb_value: ReebValue<TMesh::ScalarType>, order: usize) -> Self { 
-        return Self { vertex, reeb_value, order };
+    pub fn new(
+        vertex: TMesh::VertexDescriptor,
+        reeb_value: ReebValue<TMesh::ScalarType>,
+        order: usize,
+    ) -> Self {
+        return Self {
+            vertex,
+            reeb_value,
+            order,
+        };
     }
 
     #[inline]
@@ -77,8 +91,12 @@ impl<TMesh: Mesh> OrderedVertex<TMesh> {
 }
 
 impl<TMesh: Mesh + VertexProperties> OrderedVertex<TMesh> {
-    pub fn order_mesh_vertices(mesh: &TMesh, reeb_values: &ReebValues<TMesh>) -> TMesh::VertexPropertyMap<usize> {
-        let mut ordered_vertices = mesh.vertices()
+    pub fn order_mesh_vertices(
+        mesh: &TMesh,
+        reeb_values: &ReebValues<TMesh>,
+    ) -> TMesh::VertexPropertyMap<usize> {
+        let mut ordered_vertices = mesh
+            .vertices()
             .map(|v| Self::new(v, reeb_values[v], usize::MAX))
             .collect::<Vec<_>>();
 
@@ -117,30 +135,29 @@ impl<TMesh: Mesh> Ord for OrderedVertex<TMesh> {
     }
 }
 
-
 ///
 /// Ordered edge
-/// 
+///
 pub struct OrderedEdge<TMesh: Mesh> {
     start: OrderedVertex<TMesh>,
     end: OrderedVertex<TMesh>,
     edge: TMesh::EdgeDescriptor,
-    order: u8
+    order: u8,
 }
 
 impl<TMesh: Mesh + VertexProperties> OrderedEdge<TMesh> {
     pub fn from_edge(
-        edge: TMesh::EdgeDescriptor, 
-        mesh: &TMesh, 
+        edge: TMesh::EdgeDescriptor,
+        mesh: &TMesh,
         bottom_vertex: &OrderedVertex<TMesh>,
         top_vertex: &OrderedVertex<TMesh>,
         reeb_values: &ReebValues<TMesh>,
-        vertex_order: &TMesh::VertexPropertyMap<usize>
+        vertex_order: &TMesh::VertexPropertyMap<usize>,
     ) -> Self {
         let (v1, v2) = mesh.edge_vertices(&edge);
 
         let mut start = OrderedVertex::new(v1, reeb_values[v1], vertex_order[v2]);
-        let mut end =   OrderedVertex::new(v2, reeb_values[v2], vertex_order[v2]);
+        let mut end = OrderedVertex::new(v2, reeb_values[v2], vertex_order[v2]);
 
         // if end < start {
         //     swap(&mut end, &mut start);
@@ -151,7 +168,7 @@ impl<TMesh: Mesh + VertexProperties> OrderedEdge<TMesh> {
         }
 
         let mut order = 0;
-        
+
         if start.is_same_vertex(bottom_vertex) && end.is_same_vertex(top_vertex) {
             order = 2;
         } else if end.is_same_vertex(top_vertex) {
@@ -162,7 +179,7 @@ impl<TMesh: Mesh + VertexProperties> OrderedEdge<TMesh> {
             edge,
             start,
             end,
-            order
+            order,
         };
 
         return ordered_edge;
@@ -177,7 +194,7 @@ impl<TMesh: Mesh + VertexProperties> OrderedEdge<TMesh> {
     pub fn start(&self) -> &OrderedVertex<TMesh> {
         return &self.start;
     }
-    
+
     #[inline]
     pub fn end(&self) -> &OrderedVertex<TMesh> {
         return &self.end;
@@ -207,10 +224,9 @@ impl<TMesh: Mesh + VertexProperties> PartialOrd for OrderedEdge<TMesh> {
     }
 }
 
-
 ///
 /// Ordered triangle
-/// 
+///
 pub struct OrderedTriangle<TMesh: Mesh> {
     e1: OrderedEdge<TMesh>,
     e2: OrderedEdge<TMesh>,
@@ -218,15 +234,15 @@ pub struct OrderedTriangle<TMesh: Mesh> {
 
     bottom_vertex: OrderedVertex<TMesh>,
     middle_vertex: OrderedVertex<TMesh>,
-    top_vertex: OrderedVertex<TMesh>
+    top_vertex: OrderedVertex<TMesh>,
 }
 
 impl<TMesh: Mesh + TopologicalMesh + VertexProperties> OrderedTriangle<TMesh> {
     pub fn from_face(
-        face: &TMesh::FaceDescriptor, 
-        mesh: &TMesh, 
+        face: &TMesh::FaceDescriptor,
+        mesh: &TMesh,
         reeb_values: &ReebValues<TMesh>,
-        vertex_order: &TMesh::VertexPropertyMap<usize>
+        vertex_order: &TMesh::VertexPropertyMap<usize>,
     ) -> Self {
         let (v1, v2, v3) = mesh.face_vertices(face);
         let mut ordered_v1 = OrderedVertex::new(v1, reeb_values[v1], vertex_order[v1]);
@@ -235,19 +251,40 @@ impl<TMesh: Mesh + TopologicalMesh + VertexProperties> OrderedTriangle<TMesh> {
         sort3(&mut ordered_v1, &mut ordered_v2, &mut ordered_v3);
 
         let (e1, e2, e3) = mesh.face_edges(face);
-        let mut ordered_e1 = OrderedEdge::from_edge(e1, mesh, &ordered_v1, &ordered_v3, reeb_values, vertex_order);
-        let mut ordered_e2 = OrderedEdge::from_edge(e2, mesh, &ordered_v1, &ordered_v3, reeb_values, vertex_order);
-        let mut ordered_e3 = OrderedEdge::from_edge(e3, mesh, &ordered_v1, &ordered_v3, reeb_values, vertex_order);
+        let mut ordered_e1 = OrderedEdge::from_edge(
+            e1,
+            mesh,
+            &ordered_v1,
+            &ordered_v3,
+            reeb_values,
+            vertex_order,
+        );
+        let mut ordered_e2 = OrderedEdge::from_edge(
+            e2,
+            mesh,
+            &ordered_v1,
+            &ordered_v3,
+            reeb_values,
+            vertex_order,
+        );
+        let mut ordered_e3 = OrderedEdge::from_edge(
+            e3,
+            mesh,
+            &ordered_v1,
+            &ordered_v3,
+            reeb_values,
+            vertex_order,
+        );
         sort3(&mut ordered_e1, &mut ordered_e2, &mut ordered_e3);
-    
-        return  Self {
+
+        return Self {
             bottom_vertex: ordered_v1,
             middle_vertex: ordered_v2,
             top_vertex: ordered_v3,
 
             e1: ordered_e1,
             e2: ordered_e2,
-            e3: ordered_e3
+            e3: ordered_e3,
         };
     }
 

@@ -3,7 +3,7 @@ use std::{
     collections::{BinaryHeap, HashMap},
 };
 
-use nalgebra::{Const, Matrix4, Point3, Vector4};
+use nalgebra::{Matrix4, Point3, Vector4};
 use num_traits::{cast, Float};
 
 use crate::{
@@ -412,9 +412,48 @@ where
     }
 }
 
+pub struct BoundingSphereMaxError<TMesh: Mesh> {
+    bounding_spheres: Vec<(BoundingSphere<TMesh>, TMesh::ScalarType)>,
+}
+
+impl<TMesh: Mesh> BoundingSphereMaxError<TMesh> {
+    pub fn new(bounding_spheres: Vec<(BoundingSphere<TMesh>, TMesh::ScalarType)>) -> Self {
+        Self { bounding_spheres }
+    }
+}
+impl<TMesh: Mesh> MaxError<TMesh> for BoundingSphereMaxError<TMesh> {
+    fn max_error(
+        &self,
+        mesh: &TMesh,
+        edge: &<TMesh as Mesh>::EdgeDescriptor,
+    ) -> <TMesh as Mesh>::ScalarType {
+        let ep = mesh.edge_positions(edge);
+        for (bs, error) in &self.bounding_spheres {
+            if bs.contains_point(&ep.0) || bs.contains_point(&ep.1) {
+                return *error;
+            }
+        }
+
+        self.bounding_spheres.last().unwrap().1
+    }
+}
+
+impl<TMesh> Default for BoundingSphereMaxError<TMesh>
+where
+    TMesh: Mesh,
+{
+    fn default() -> Self {
+        let origin = Point3::<TMesh::ScalarType>::origin();
+        let radius = TMesh::ScalarType::max_value();
+        let bounding_sphere = BoundingSphere::<TMesh> { origin, radius };
+        let bounding_spheres = vec![(bounding_sphere, cast(0.001).unwrap())];
+        Self { bounding_spheres }
+    }
+}
+
 pub struct BoundingSphere<TMesh: Mesh> {
-    origin: Point3<TMesh::ScalarType>,
-    radius: TMesh::ScalarType,
+    pub origin: Point3<TMesh::ScalarType>,
+    pub radius: TMesh::ScalarType,
 }
 
 impl<TMesh> BoundingSphere<TMesh>
