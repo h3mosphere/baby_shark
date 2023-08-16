@@ -11,4 +11,10 @@ pub mod triangulation;
 #[allow(clippy::all)]
 pub mod reeb_graph;
 
+pub mod exports {
+    pub use nalgebra;
+    pub use nalgebra_glm;
+}
+
 mod helpers;
+
