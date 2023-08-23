@@ -22,22 +22,22 @@ fn main() {
         .read_stl_from_file(Path::new(&path))
         .expect("Read mesh from STL");
 
-    let origin = Point3::<f32>::new(5.208000, 0.336000, -8.716712);
+    let origin = Point3::<f32>::new(0.0, 0.0, 0.0);
     let origin2 = origin.clone();
     let bounding_spheres = vec![
         (
             BoundingSphere {
                 origin,
-                radius: 15.0,
+                radius: 5.0,
             },
-            0.001,
+            0.0001,
         ),
         (
             BoundingSphere {
                 origin: origin2,
-                radius: 30.0,
+                radius: 15.0,
             },
-            0.1,
+            0.001,
         ),
         (
             BoundingSphere {
